@@ -18,18 +18,18 @@ For this power analysis we will simulate 20 labs contributing 16 infants (320 pa
 
 Factors:
 
-- familiarized_rule: indicates the sequence to which infants were exposed during familiarization (ABA or ABB). Infants were exposed to only one sequence, with the sequence determined by random assignment. (GK: not counterbalanced per lab?)
+* *familiarized_rule*: indicates the sequence to which infants were exposed during familiarization (ABA or ABB). Infants were exposed to only one sequence, with the sequence determined by random assignment. (GK: not counterbalanced per lab?)
 
-- test_rule (trial_type): indicates whether each test sequence followed the same rule to which the infant was familiarized or a different rule. For example, if an infant heard an ABA rule during familiarization, ABA trials would be the same trial type and ABB trials would be the different trial type. (GK: don't infants get both types of test trials?)
+* *trial_type*: indicates whether each test sequence followed the same rule to which the infant was familiarized or a different rule. For example, if an infant heard an ABA rule during familiarization, ABA trials would be the *same* trial type and ABB trials would be the *different* trial type (each infant get 6 of same and 6 different)
 
-- trial_num: indicates the sequential order in which test trials were presented. Trial number thus ranges from 1 to 12. 
+* *trial_num*: indicates the sequential order in which test trials were presented. Trial number thus ranges from 1 to 12. 
 
-- age_mos: the infants' age in months (5.0-12.0). Age will be centered before entering the models.
+* *age_mos*: the infants' age in months (5.0-12.0), centered in *age* column.
 
-- procedure: indicates the experimental method that was used to record infants’ responses to the stimuli: headturn preference procedure (HPP), central fixation (CF), or eye tracking (ET). 
-- test_order: indicates which of the four pseudorandom test orders (from our provided scripts) were used to present test trials to the infant. 
+* *procedure*: indicates the experimental method that was used to record infants’ responses to the stimuli: headturn preference procedure (HPP), central fixation (CF), or eye tracking (ET). 
+* *test_order*: indicates which of the four pseudorandom test orders (from our provided scripts) were used to present test trials to the infant. 
 
-- multilingual_exposure: indicates the infants' exposure to the secondary/primary language, ranging from 0% (no exposure to a secondary language) to 49% (i.e., baby hears 51% of their primary language and 49% of the secondary language). 
+* *multilingual_exposure*: indicates the infants' exposure to the secondary/primary language, ranging from 0% (no exposure to a secondary language) to 49% (i.e., baby hears 51% of their primary language and 49% of the secondary language). 
 
 
 ```{r simulate-data}
@@ -44,15 +44,12 @@ subjID = 1:(n_labs*n_per_lab)
 lab_procedure = sample(c("HPP","CF","EF"), n_labs, replace=T, prob=c(.5,.3,.2))
 procedure = rep(lab_procedure, each=n_per_lab)
 
-test_order = rep(1:4, 4*n_labs) # test order is a 50/50 mix of test_rules, or not?
-
-# randomly assigned, or counterbalanced per lab?
-test_rule = sample(c("same","different"), length(subjID), replace=T)
+test_order = rep(1:4, 4*n_labs) 
 
 # familiarized rule (ms says randomly assigned: we don't want counterbalanced per lab?)
 familiarized_rule = sample(c("ABB","ABA"), length(subjID), replace=T)
 
-simd <- tibble(subjID, labID, procedure, test_order, familiarized_rule, test_rule)
+simd <- tibble(subjID, labID, procedure, test_order, familiarized_rule)
 
 # uniform random vars
 simd$age_mos = runif(nrow(simd), min=5.0, max=12.0)
@@ -69,14 +66,19 @@ for(t in 1:12) {
 siml <- simd %>% pivot_longer(cols=starts_with("trial."), 
                      names_to="trial_num", 
                      names_prefix="trial.",
-                     values_to="looking_time")
+                     values_to="looking_time") 
+
+siml$trial_num = as.numeric(siml$trial_num)
+
+# 6 same / 6 different per child; should be according to 1 of 4 pseudorandom orders, but we're not actually modeling order effects here so just make blocks:
+siml$trial_type = rep(c(rep("same", 6), rep("different", 6)), each=nrow(simd))
 
 # what effects do we want to simulate?
-# minimally, when test_rule=="same" looking times should be longer
+# minimally, when trial_type=="same" looking times should be longer
 # maybe this effect gets stronger with age, and/or stronger with multilingual_exposure
 effect_size = .3
-inds_to_shift = which(siml$test_rule=="same")
-siml[inds_to_shift,]$looking_time = rnorm(length(inds_to_shift), mean=-effect_size, sd=1)
+inds_to_shift = which(siml$trial_type=="same")
+siml[inds_to_shift,]$looking_time = rnorm(length(inds_to_shift), mean=effect_size, sd=1)
 
 ```
 
@@ -86,9 +88,8 @@ Infants' looking time (DV) ~ 1+ familiarization order (ABB vs ABA) * trial_type 
 
 ```{r model, echo=FALSE}
 #m1 <- glmer(z ~ x + (1|g), family="poisson", data=simdata)
-m1 <- lmer(looking_time ~ 1 + test_rule * 
+m1 <- lmer(looking_time ~ 1 + trial_type * 
              (familiarized_rule + age + procedure + multilingual_exposure + trial_num) +
-             (trial_num * test_rule | subjID) + (test_order | labID), data=siml)
+             (trial_num * trial_type | subjID) + (test_order | labID), data=siml)
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
