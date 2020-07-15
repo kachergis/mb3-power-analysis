@@ -60,8 +60,9 @@ simd$multilingual_exposure = runif(nrow(simd), min=0, max=.5) # 0=monolingual, .
 
 # now just generate looking times for 12 trials per subject
 for(t in 1:12) {
-  simd[,paste0("trial.",t)] = rnorm(nrow(simd), mean=0, sd=1) # rexp(nrow(simd), rate=2) ?
-}
+  simd[,paste0("trial.",t)] = rlnorm(n = nrow(simd), 
+                   meanlog = log((10^2) / sqrt(0.5^2 + 10^2)), 
+                   sdlog = sqrt(log(1 + (0.5^2 / 10^2))))} #say raw LT mean = 10, raw LT SD = 1
 
 siml <- simd %>% pivot_longer(cols=starts_with("trial."), 
                      names_to="trial_num", 
@@ -94,17 +95,17 @@ Infants' looking time (DV) ~ 1+ familiarization order (ABB vs ABA) * trial_type 
 
 ```{r model, echo=FALSE}
 #m1 <- glmer(z ~ x + (1|g), family="poisson", data=simdata)
-m1 <- lmer(looking_time ~ 1 + trial_type * 
-             (familiarized_rule + age + procedure + multilingual_exposure + trial_num) +
-             (trial_num * trial_type | subjID) + (test_order | labID), data=siml)
+# m1 <- lmer(looking_time ~ 1 + trial_type * 
+#              (familiarized_rule + age + procedure + multilingual_exposure + trial_num) +
+#              (trial_num * trial_type | subjID) + (test_order | labID), data=siml)
 
-m_simple <- lmer(looking_time ~ 1 + trial_type + trial_num + (1 | subjID), data=siml)
+m_simple <- lmer(looking_time ~ 1 + trial_type * trial_num + (1 | subjID), data=siml)
 summary(m_simple)
 ```
 
 ```{r, power-analysis}
 fixef(m_simple)["trial_typesame"] <- effect_size
 fixef(m_simple)["trial_num"] <- .1
-powerSim(m_simple)
+powerSim(m_simple, test = fixed("trial_type"), nsim =100) #we need to specify the fixed effect that we want to do, cause simrR can only calculate power for one particular coefficient each time
 ```
 
