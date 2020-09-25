@@ -31,63 +31,89 @@ Factors:
 
 * *multilingual_exposure*: indicates the infants' exposure to the secondary/primary language, ranging from 0% (no exposure to a secondary language) to 49% (i.e., baby hears 51% of their primary language and 49% of the secondary language). 
 
+To do our power analysis, we will generate 100 datasets of this structure with a given effect size (e.g., .3), run the mixed-effects regression for each simulated dataset, and count the number of times that the effect is significant.
+
+## Simulate Datasets
 
 ```{r simulate-data}
 set.seed(123) # reproducible sampling
 
-n_labs = 20
-n_per_lab = 16
-labID = rep(LETTERS[1:n_labs], each=n_per_lab)
-subjID = 1:(n_labs*n_per_lab)
+generate_dataset <- function(n_labs=20, n_per_lab=16, effect_size=.3) {
+  # rewrite to use expand.grid ?
+  labID = rep(LETTERS[1:n_labs], each=n_per_lab)
+  subjID = 1:(n_labs*n_per_lab)
 
-# assume each lab uses one procedure
-lab_procedure = sample(c("HPP","CF","EF"), n_labs, replace=T, prob=c(.5,.3,.2))
-procedure = rep(lab_procedure, each=n_per_lab)
+  # assume each lab uses one procedure
+  lab_procedure = sample(c("HPP","CF","EF"), n_labs, replace=T, prob=c(.5,.3,.2))
+  procedure = rep(lab_procedure, each=n_per_lab)
 
-test_order = rep(1:4, 4*n_labs) 
+  test_order = rep(1:4, 4*n_labs) 
 
-# familiarized rule (ms says randomly assigned: we don't want counterbalanced per lab?)
-familiarized_rule = sample(c("ABB","ABA"), length(subjID), replace=T)
+  # familiarized rule (ms says randomly assigned: we don't want counterbalanced per lab?)
+  familiarized_rule = sample(c("ABB","ABA"), length(subjID), replace=T)
 
-simd <- tibble(subjID, labID, procedure, test_order, familiarized_rule)
+  simd <- tibble(subjID, labID, procedure, test_order, familiarized_rule)
 
-# uniform random vars
-simd$age_mos = runif(nrow(simd), min=5.0, max=12.0)
-simd$age = scale(simd$age_mos, center=T, scale=F)[,1]
+  # uniform random vars
+  simd$age_mos = runif(nrow(simd), min=5.0, max=12.0)
+  simd$age = scale(simd$age_mos, center=T, scale=F)[,1]
 
-# should actually be bimodal (use MB1 distro?)
-simd$multilingual_exposure = runif(nrow(simd), min=0, max=.5) # 0=monolingual, .5=50% secondary language
+  # should actually be bimodal (use MB1 distro?)
+  simd$multilingual_exposure = runif(nrow(simd), min=0, max=.5) # 0=monolingual, .5=50% secondary language
 
-# now just generate looking times for 12 trials per subject
-for(t in 1:12) {
-  simd[,paste0("trial.",t)] = rlnorm(n = nrow(simd), 
-                   meanlog = log((10^2) / sqrt(0.5^2 + 10^2)), 
-                   sdlog = sqrt(log(1 + (0.5^2 / 10^2))))} #say raw LT mean = 10, raw LT SD = 1
-
-siml <- simd %>% pivot_longer(cols=starts_with("trial."), 
+  # now generate looking times for 12 trials per subject
+  for(t in 1:12) {
+    simd[,paste0("trial.",t)] = rnorm(n = nrow(simd), mean=0, sd=1) # = .05
+  } 
+  
+  # DO WE NEED TO USE LOG-NORMAL DISTRIBUTION? IF SO, NEED TO SCALE EFFECT SIZE
+  #for(t in 1:12) {
+  #  simd[,paste0("trial.",t)] = rlnorm(n = nrow(simd), 
+  #                 meanlog = log((10^2) / sqrt(0.5^2 + 10^2)), # = 2.3
+  #                 sdlog = sqrt(log(1 + (0.5^2 / 10^2)))) # = .05
+  #} #say raw LT mean = 10, raw LT SD = 1
+  
+  
+  siml <- simd %>% pivot_longer(cols=starts_with("trial."), 
                      names_to="trial_num", 
                      names_prefix="trial.",
                      values_to="looking_time") 
 
-siml$trial_num = as.numeric(siml$trial_num)
+  siml$trial_num = as.numeric(siml$trial_num)
 
-# 6 same / 6 different per child; should be according to 1 of 4 pseudorandom orders, but we're not actually modeling order effects here so just make blocks:
-siml$trial_type = rep_len(c(rep("same", 6), rep("different", 6)), nrow(siml)) # each
+  # 6 same / 6 different per child; should be according to 1 of 4 pseudorandom orders, but we're not   actually modeling order effects here so just make blocks:
+  siml$trial_type = rep_len(c(rep("same", 6), rep("different", 6)), nrow(siml)) # each
 
-per_subj_trial_type = c(rep("same", 6), rep("different", 6))
-for(s in 1:length(unique(siml$subjID))) {
-  subjInd = which(siml$subjID==s)
-  siml[subjInd,]$trial_type = sample(per_subj_trial_type, 12, replace = F)
-}
+  per_subj_trial_type = c(rep("same", 6), rep("different", 6))
+  for(s in 1:length(unique(siml$subjID))) {
+    subjInd = which(siml$subjID==s)
+    siml[subjInd,]$trial_type = sample(per_subj_trial_type, 12, replace = F)
+  }
 
 # what effects do we want to simulate?
 # minimally, when trial_type=="same" looking times should be longer
 # maybe this effect gets stronger with age, and/or stronger with multilingual_exposure
-effect_size = .3 # .25 in meta-analysis
-inds_to_shift = which(siml$trial_type=="same")
-siml[inds_to_shift,]$looking_time = rnorm(length(inds_to_shift), mean=effect_size, sd=1)
+  # .25 in meta-analysis
+  inds_to_shift = which(siml$trial_type=="same")
+  siml[inds_to_shift,]$looking_time = rnorm(length(inds_to_shift), mean=effect_size, sd=1)
+  
+  return(siml)
+}
 
 ```
+
+## Plot Example Dataset
+
+```{r}
+siml = generate_dataset(effect_size=.3)
+
+dag <- siml %>% group_by(subjID, trial_type, trial_num) %>%
+  tidyboot::tidyboot_mean(looking_time) 
+
+ggplot(dag, aes(x=trial_num, y=looking_time, group=trial_type, color=trial_type)) + 
+    geom_point(alpha=.8)
+```
+
 
 ## Model Structure
 
@@ -99,13 +125,37 @@ Infants' looking time (DV) ~ 1+ familiarization order (ABB vs ABA) * trial_type 
 #              (familiarized_rule + age + procedure + multilingual_exposure + trial_num) +
 #              (trial_num * trial_type | subjID) + (test_order | labID), data=siml)
 
-m_simple <- lmer(looking_time ~ 1 + trial_type * trial_num + (1 | subjID), data=siml)
-summary(m_simple)
+fit_model <- function(siml) {
+  m_simple <- lmer(looking_time ~ 1 + trial_type * trial_num + (1 | subjID), data=siml)
+  return(summary(m_simple)$coefficients["trial_typesame",])
+}
 ```
 
 ```{r, power-analysis}
 fixef(m_simple)["trial_typesame"] <- effect_size
-fixef(m_simple)["trial_num"] <- .1
-powerSim(m_simple, test = fixed("trial_type"), nsim =100) #we need to specify the fixed effect that we want to do, cause simrR can only calculate power for one particular coefficient each time
+fixef(m_simple)["trial_num"] <- 0.1
+p <- powerSim(m_simple, test = fixed("trial_typesame"), nsim =100) 
+#we need to specify the fixed effect that we want to do, cause simrR can only calculate power for one particular coefficient each time
+```
+
+## Other approaches
+
+```{r}
+# https://www.rdocumentation.org/packages/lme4/versions/1.1-23/topics/simulate.merMod
+mmod <- simulate(m_simple, nsim = 10, seed = 123)
+# this generates new data from the lmer model...better to use this or our own custom function?
+```
+
+
+## Power Curve Analysis
+
+```{r}
+#model2 <- extend(m_simple, along="subjID", n=360)
+#pc <- powerCurve(model2) 
+#print(pc)
+
+model1 <- glmer(z ~ x + (1|g), family="poisson", data=simdata)
+fixef(model1)
+powerSim(model1) # 82% power, but lots of singularities...
 ```
 
