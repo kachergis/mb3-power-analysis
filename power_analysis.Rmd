@@ -1,7 +1,7 @@
 ---
 title: "MB3 Power Analysis"
 author: "George & Angeline"
-date: `r Sys.Date()`
+date: "10/21/2020"
 output: html_document
 ---
 
@@ -137,6 +137,10 @@ fit_model <- function(siml) {
 
 ```
 
+## Power Analysis
+
+To do the power analysis, we simply generate 1000 datasets with a main effect (size = 0.3) of trial type, run the above linear mixed-effects model, and report how many times the trial type effect is significant,
+
 ```{r, power-analysis}
 # repeatedly generate data and  significance of trial_typesame
 get_power <- function(effect_size, N=100, alpha=.05) {
@@ -148,8 +152,8 @@ get_power <- function(effect_size, N=100, alpha=.05) {
   return(p)
 }
 
-pvalues = get_power(effect_size=0.3, N=100)
+pvalues = get_power(effect_size=0.3, N=1000)
 ```
 
-94 of 100 simulated datasets had a trial type effect with $p<.05$.
+The trial type effect was significant ($p<.05$) in `r length(which(pvalues<0.05))` of the 1000 simulations.
 
