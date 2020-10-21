@@ -1,14 +1,14 @@
 ---
 title: "MB3 Power Analysis"
 author: "George & Angeline"
-date: "7/2/2020"
+date: `r Sys.Date()`
 output: html_document
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-library(simr)
 require(tidyverse)
+library(lmerTest)
 ```
 
 ## Design
@@ -66,7 +66,7 @@ generate_dataset <- function(n_labs=20, n_per_lab=16, effect_size=.3) {
     simd[,paste0("trial.",t)] = rnorm(n = nrow(simd), mean=0, sd=1) # = .05
   } 
   
-  # DO WE NEED TO USE LOG-NORMAL DISTRIBUTION? IF SO, NEED TO SCALE EFFECT SIZE
+  # USE LOG-NORMAL DISTRIBUTION? IF SO, NEED TO SCALE EFFECT SIZE
   #for(t in 1:12) {
   #  simd[,paste0("trial.",t)] = rlnorm(n = nrow(simd), 
   #                 meanlog = log((10^2) / sqrt(0.5^2 + 10^2)), # = 2.3
@@ -85,9 +85,11 @@ generate_dataset <- function(n_labs=20, n_per_lab=16, effect_size=.3) {
   siml$trial_type = rep_len(c(rep("same", 6), rep("different", 6)), nrow(siml)) # each
 
   per_subj_trial_type = c(rep("same", 6), rep("different", 6))
+  siml$subjInt = 0.0
   for(s in 1:length(unique(siml$subjID))) {
     subjInd = which(siml$subjID==s)
     siml[subjInd,]$trial_type = sample(per_subj_trial_type, 12, replace = F)
+    siml[subjInd,]$subjInt = rnorm(1, mean=0, sd=1)
   }
 
 # what effects do we want to simulate?
@@ -95,8 +97,9 @@ generate_dataset <- function(n_labs=20, n_per_lab=16, effect_size=.3) {
 # maybe this effect gets stronger with age, and/or stronger with multilingual_exposure
   # .25 in meta-analysis
   inds_to_shift = which(siml$trial_type=="same")
-  siml[inds_to_shift,]$looking_time = rnorm(length(inds_to_shift), mean=effect_size, sd=1)
-  
+  siml[inds_to_shift,]$looking_time = rnorm(length(inds_to_shift), mean=effect_size, sd=1) + 
+    siml[inds_to_shift,]$subjInt
+  siml$subjID = as.factor(siml$subjID)
   return(siml)
 }
 
@@ -108,10 +111,12 @@ generate_dataset <- function(n_labs=20, n_per_lab=16, effect_size=.3) {
 siml = generate_dataset(effect_size=.3)
 
 dag <- siml %>% group_by(subjID, trial_type, trial_num) %>%
-  tidyboot::tidyboot_mean(looking_time) 
+  tidyboot::tidyboot_mean(looking_time) # quite slow..
 
-ggplot(dag, aes(x=trial_num, y=looking_time, group=trial_type, color=trial_type)) + 
-    geom_point(alpha=.8)
+ggplot(dag, aes(x=trial_num, y=mean, group=trial_type, color=trial_type)) + 
+    geom_point(aes(y=mean, x=jitter(trial_num)), alpha=.2) + 
+    geom_linerange(aes(ymin=ci_lower, ymax=ci_upper)) + 
+    theme_bw()
 ```
 
 
@@ -127,35 +132,24 @@ Infants' looking time (DV) ~ 1+ familiarization order (ABB vs ABA) * trial_type 
 
 fit_model <- function(siml) {
   m_simple <- lmer(looking_time ~ 1 + trial_type * trial_num + (1 | subjID), data=siml)
-  return(summary(m_simple)$coefficients["trial_typesame",])
+  return(summary(m_simple)$coefficients["trial_typesame","Pr(>|t|)"]) # "Estimate","t value",
 }
+
 ```
 
 ```{r, power-analysis}
-fixef(m_simple)["trial_typesame"] <- effect_size
-fixef(m_simple)["trial_num"] <- 0.1
-p <- powerSim(m_simple, test = fixed("trial_typesame"), nsim =100) 
-#we need to specify the fixed effect that we want to do, cause simrR can only calculate power for one particular coefficient each time
+# repeatedly generate data and  significance of trial_typesame
+get_power <- function(effect_size, N=100, alpha=.05) {
+  p = rep(NA, N)
+  for(i in 1:N) {
+    p[i] = fit_model(generate_dataset(effect_size=effect_size))
+  }
+  print(paste(length(which(p<alpha)), "of",N, "simulations had p <",alpha))
+  return(p)
+}
+
+pvalues = get_power(effect_size=0.3, N=100)
 ```
 
-## Other approaches
-
-```{r}
-# https://www.rdocumentation.org/packages/lme4/versions/1.1-23/topics/simulate.merMod
-mmod <- simulate(m_simple, nsim = 10, seed = 123)
-# this generates new data from the lmer model...better to use this or our own custom function?
-```
-
-
-## Power Curve Analysis
-
-```{r}
-#model2 <- extend(m_simple, along="subjID", n=360)
-#pc <- powerCurve(model2) 
-#print(pc)
-
-model1 <- glmer(z ~ x + (1|g), family="poisson", data=simdata)
-fixef(model1)
-powerSim(model1) # 82% power, but lots of singularities...
-```
+94 of 100 simulated datasets had a trial type effect with $p<.05$.
 
