@@ -31,7 +31,8 @@ Factors:
 
 * *multilingual_exposure*: indicates the infants' exposure to the secondary/primary language, ranging from 0% (no exposure to a secondary language) to 49% (i.e., baby hears 51% of their primary language and 49% of the secondary language). 
 
-To do our power analysis, we will generate 100 datasets of this structure with a given effect size (e.g., .3), run the mixed-effects regression for each simulated dataset, and count the number of times that the effect is significant.
+To do our power analysis, we will generate 100 datasets of this structure with a given effect size (e.g., .3), run the mixed-effects regression for each simulated dataset, and count the number of times that the effect is significant. 
+Note that we generate normally-distributed looking times, assuming that they have already been log-transformed.
 
 ## Simulate Datasets
 
@@ -107,32 +108,35 @@ generate_dataset <- function(n_labs=20, n_per_lab=16, effect_size=.3) {
 
 ## Plot Example Dataset
 
-```{r}
+```{r, fig.width=6, fig.height=4.5, caption="Log(looking time) by trial type and trial number with a simulated main effect (size=.3) of trial type, and bootstrapped 95% confidence intervals."}
 siml = generate_dataset(effect_size=.3)
 
 dag <- siml %>% group_by(subjID, trial_type, trial_num) %>%
+  summarise(looking_time = mean(looking_time)) %>% 
+  group_by(trial_type, trial_num) %>%
   tidyboot::tidyboot_mean(looking_time) # quite slow..
 
+pos = position_dodge(width=.2)
 ggplot(dag, aes(x=trial_num, y=mean, group=trial_type, color=trial_type)) + 
-    geom_point(aes(y=mean, x=jitter(trial_num)), alpha=.2) + 
-    geom_linerange(aes(ymin=ci_lower, ymax=ci_upper)) + 
-    theme_bw()
+  geom_point(aes(y=mean, x=trial_num), pos=pos) + 
+  ylab("Mean log(looking time)") + xlab("Trial Number") + 
+  geom_linerange(aes(ymin=ci_lower, ymax=ci_upper), pos=pos) + 
+  theme_bw() #+ scale_x_discrete(labels=paste(1:12))
 ```
 
 
 ## Model Structure
 
-Infants' looking time (DV) ~ 1+ familiarization order (ABB vs ABA) * trial_type + age * trial_type (same rule vs different rule at test) + experimental_method (HPP vs central fixation vs eye-tracking) * trial_type + multilingual_exposure * trial_type + trial_num * trial_type + (trial_num*trial_type | subject) + (test_order | lab)
+Infants' log(looking time) (DV) ~ 1 + familiarization order (ABB vs ABA) * trial_type + age * trial_type (same rule vs different rule at test) + experimental_method (HPP vs central fixation vs eye-tracking) * trial_type + multilingual_exposure * trial_type + trial_num * trial_type + (trial_num*trial_type | subject) + (test_order | lab)
 
-```{r model, echo=FALSE}
-#m1 <- glmer(z ~ x + (1|g), family="poisson", data=simdata)
+```{r model}
 # m1 <- lmer(looking_time ~ 1 + trial_type * 
 #              (familiarized_rule + age + procedure + multilingual_exposure + trial_num) +
 #              (trial_num * trial_type | subjID) + (test_order | labID), data=siml)
 
 fit_model <- function(siml) {
-  m_simple <- lmer(looking_time ~ 1 + trial_type * trial_num + (1 | subjID), data=siml)
-  return(summary(m_simple)$coefficients["trial_typesame","Pr(>|t|)"]) # "Estimate","t value",
+  m1 <- lmer(looking_time ~ 1 + trial_type * trial_num + (1 | subjID), data=siml)
+  return(summary(m1)$coefficients["trial_typesame","Pr(>|t|)"]) # "Estimate","t value",
 }
 
 ```
