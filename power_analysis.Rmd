@@ -1,7 +1,7 @@
 ---
 title: "MB3 Power Analysis"
 author: "George & Angeline"
-date: "10/21/2020"
+date: "`r Sys.Date()`"
 output: html_document
 ---
 
@@ -39,7 +39,7 @@ Note that we generate normally-distributed looking times, assuming that they hav
 ```{r simulate-data}
 set.seed(123) # reproducible sampling
 
-generate_dataset <- function(n_labs=20, n_per_lab=16, effect_size=.3) {
+generate_dataset <- function(n_labs=20, n_per_lab=16, effect_sizes=list(type = .3, age = 0, "age*type"=0)) {
   # rewrite to use expand.grid ?
   labID = rep(LETTERS[1:n_labs], each=n_per_lab)
   subjID = 1:(n_labs*n_per_lab)
@@ -86,20 +86,25 @@ generate_dataset <- function(n_labs=20, n_per_lab=16, effect_size=.3) {
   siml$trial_type = rep_len(c(rep("same", 6), rep("different", 6)), nrow(siml)) # each
 
   per_subj_trial_type = c(rep("same", 6), rep("different", 6))
+  # add subject random intercept
   siml$subjInt = 0.0
   for(s in 1:length(unique(siml$subjID))) {
     subjInd = which(siml$subjID==s)
     siml[subjInd,]$trial_type = sample(per_subj_trial_type, 12, replace = F)
     siml[subjInd,]$subjInt = rnorm(1, mean=0, sd=1)
   }
-
-# what effects do we want to simulate?
-# minimally, when trial_type=="same" looking times should be longer
-# maybe this effect gets stronger with age, and/or stronger with multilingual_exposure
-  # .25 in meta-analysis
-  inds_to_shift = which(siml$trial_type=="same")
-  siml[inds_to_shift,]$looking_time = rnorm(length(inds_to_shift), mean=effect_size, sd=1) + 
-    siml[inds_to_shift,]$subjInt
+  
+  # add lab random intercept
+  siml$labInt = 0.0
+  for(lab in labID) {
+    labInd = which(siml$labID==lab)
+    siml[labInd,]$labInt = rnorm(1, mean=0, sd=1) # could increase per-lab variability ..
+  }
+  
+  trial_type = with(siml, ifelse(trial_type=="same", 0, 1))
+  error_term = rnorm(nrow(siml), 0, sd=1) + siml$labInt + siml$subjInt 
+  siml$looking_time = trial_type * effect_sizes$type + siml$age * effect_sizes$age + trial_type * siml$age * effect_sizes$`age*type` + error_term
+  
   siml$subjID = as.factor(siml$subjID)
   return(siml)
 }
@@ -108,20 +113,23 @@ generate_dataset <- function(n_labs=20, n_per_lab=16, effect_size=.3) {
 
 ## Plot Example Dataset
 
-```{r, fig.width=6, fig.height=4.5, caption="Log(looking time) by trial type and trial number with a simulated main effect (size=.3) of trial type, and bootstrapped 95% confidence intervals."}
-siml = generate_dataset(effect_size=.3)
+We generate and plot an example dataset with trial_type main effect size of .3, age main effect size of -.2, and an age*trial_type interaction effect size of .3.
 
-dag <- siml %>% group_by(subjID, trial_type, trial_num) %>%
+```{r, fig.width=6, fig.height=4.5, caption="Log(looking time) by trial type and trial number with a simulated main effect (size=.3) of trial type, and bootstrapped 95% confidence intervals."}
+#siml = generate_dataset(effect_sizes=list(type = .3, age = 0, "age*type"=0))
+siml = generate_dataset(effect_sizes=list(type = .3, age = -.2, "age*type"=.3))
+
+dag <- siml %>% group_by(subjID, trial_type, age_mos) %>%
   summarise(looking_time = mean(looking_time)) %>% 
-  group_by(trial_type, trial_num) %>%
+  group_by(trial_type, age_mos) %>%
   tidyboot::tidyboot_mean(looking_time) # quite slow..
 
 pos = position_dodge(width=.2)
-ggplot(dag, aes(x=trial_num, y=mean, group=trial_type, color=trial_type)) + 
-  geom_point(aes(y=mean, x=trial_num), pos=pos) + 
-  ylab("Mean log(looking time)") + xlab("Trial Number") + 
+ggplot(dag, aes(x=age_mos, y=mean, group=trial_type, color=trial_type)) + 
+  geom_point(aes(y=mean, x=age_mos), pos=pos) + 
+  ylab("Standardized log(looking time)") + xlab("Age (months)") + 
   geom_linerange(aes(ymin=ci_lower, ymax=ci_upper), pos=pos) + 
-  theme_bw() #+ scale_x_discrete(labels=paste(1:12))
+  theme_bw() + geom_smooth(method="lm")
 ```
 
 
@@ -134,30 +142,62 @@ Infants' log(looking time) (DV) ~ 1 + familiarization order (ABB vs ABA) * trial
 #              (familiarized_rule + age + procedure + multilingual_exposure + trial_num) +
 #              (trial_num * trial_type | subjID) + (test_order | labID), data=siml)
 
-fit_model <- function(siml) {
+# model without age
+fit_simple_model <- function(siml) {
   m1 <- lmer(looking_time ~ 1 + trial_type * trial_num + (1 | subjID), data=siml)
   return(summary(m1)$coefficients["trial_typesame","Pr(>|t|)"]) # "Estimate","t value",
 }
 
+# check both
+fit_model <- function(siml) {
+  m1 <- lmer(looking_time ~ 1 + trial_type * trial_num + trial_type * age + (1 | subjID) + (1 | labID), data=siml)
+  sig =c(summary(m1)$coefficients["trial_typesame","Pr(>|t|)"],
+       summary(m1)$coefficients["trial_typesame:age","Pr(>|t|)"])
+  return(sig) # "Estimate","t value",
+}
+
+# need to update fit_model to return significance of all desired effects (e.g., if effect_size$age!=0)
 ```
 
 ## Power Analysis
 
-To do the power analysis, we simply generate 1000 datasets with a main effect (size = 0.3) of trial type, run the above linear mixed-effects model, and report how many times the trial type effect is significant,
+We use this simplified model for the power analysis:
+y ~ 1 + trial_type * trial_num + trial_type * age + (1 | subjID) + (1 | labID)
+
+To do the power analysis, we simply generate 1000 datasets with main effect sizes of 0.1, 0.2, and 0.3 for trial type, age, and their interaction, run the above linear mixed-effects model, and report how many times the trial type effect is significant.
 
 ```{r, power-analysis}
 # repeatedly generate data and  significance of trial_typesame
-get_power <- function(effect_size, N=100, alpha=.05) {
-  p = rep(NA, N)
+get_power <- function(effect_sizes, N=100, alpha=.05, verbose=F) {
+  p = data.frame(type=numeric(), "age*type"=numeric())
+  colnames(p) = c("type","age*type")
   for(i in 1:N) {
-    p[i] = fit_model(generate_dataset(effect_size=effect_size))
+    p[i,] = fit_model(generate_dataset(effect_sizes=effect_sizes))
   }
-  print(paste(length(which(p<alpha)), "of",N, "simulations had p <",alpha))
+  if(verbose) {
+    print(paste(length(which(p$type<alpha)), "of",N, "simulations had p <",alpha, "for trial type"))
+    print(paste(length(which(p[,"age*type"]<alpha)), "of",N, "simulations had p <",alpha, "for age*trial type"))
+  }
   return(p)
 }
 
-pvalues = get_power(effect_size=0.3, N=1000)
+N = 100
+pvalues_pt1 = get_power(effect_sizes=list(type = .1, age = .1, "age*type"=.1), N=N)
+pvalues_pt2 = get_power(effect_sizes=list(type = .2, age = .2, "age*type"=.2), N=N)
+# .25 is the meta-analysis average effect size, but .3 is avg across all published devo expts
+pvalues_pt3 = get_power(effect_sizes=list(type = .3, age = .3, "age*type"=.3), N=N)
 ```
 
-The trial type effect was significant ($p<.05$) in `r length(which(pvalues<0.05))` of the 1000 simulations.
+### Effect sizes = .1
+`r paste(length(which(pvalues_pt1$type<.05)), "of",N, "simulations had p <",.05, "for trial type.")`
+`r paste(length(which(pvalues_pt1[,"age*type"]<.05)), "of",N, "simulations had p <",.05, "for age*trial type.")` 
 
+
+### Effect sizes = .2
+`r paste(length(which(pvalues_pt2$type<.05)), "of",N, "simulations had p <",.05, "for trial type.")`
+`r paste(length(which(pvalues_pt2[,"age*type"]<.05)), "of",N, "simulations had p <",.05, "for age*trial type.")` 
+
+
+### Effect sizes = .3
+`r paste(length(which(pvalues_pt3$type<.05)), "of",N, "simulations had p <",.05, "for trial type.")`
+`r paste(length(which(pvalues_pt3[,"age*type"]<.05)), "of",N, "simulations had p <",.05, "for age*trial type.")` 
