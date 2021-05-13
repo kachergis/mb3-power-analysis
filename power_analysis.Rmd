@@ -14,7 +14,7 @@ library(lmerTest)
 ## Design
 
 
-For this power analysis we will simulate 20 labs contributing 16 infants (320 participants) from 5 to 12 months of age.
+For this power analysis we will simulate 20 labs contributing 20 infants (400 participants) from 5 to 12 months of age.
 
 Factors:
 
@@ -39,7 +39,7 @@ Note that we generate normally-distributed looking times, assuming that they hav
 ```{r simulate-data}
 set.seed(123) # reproducible sampling
 
-generate_dataset <- function(n_labs=20, n_per_lab=16, effect_sizes=list(type = .3, age = 0, "age*type"=0)) {
+generate_dataset <- function(n_labs=20, n_per_lab=20, effect_sizes=list(type = .3, age = 0, "age*type"=0)) {
   # rewrite to use expand.grid ?
   labID = rep(LETTERS[1:n_labs], each=n_per_lab)
   subjID = 1:(n_labs*n_per_lab)
@@ -48,7 +48,7 @@ generate_dataset <- function(n_labs=20, n_per_lab=16, effect_sizes=list(type = .
   lab_procedure = sample(c("HPP","CF","EF"), n_labs, replace=T, prob=c(.5,.3,.2))
   procedure = rep(lab_procedure, each=n_per_lab)
 
-  test_order = rep(1:4, 4*n_labs) 
+  test_order = rep(1:4, 5*n_labs) 
 
   # familiarized rule (ms says randomly assigned: we don't want counterbalanced per lab?)
   familiarized_rule = sample(c("ABB","ABA"), length(subjID), replace=T)
@@ -81,6 +81,7 @@ generate_dataset <- function(n_labs=20, n_per_lab=16, effect_sizes=list(type = .
                      values_to="looking_time") 
 
   siml$trial_num = as.numeric(siml$trial_num)
+  siml$trial_num_sc = scale(siml$trial_num, center=T, scale=F) 
 
   # 6 same / 6 different per child; should be according to 1 of 4 pseudorandom orders, but we're not   actually modeling order effects here so just make blocks:
   siml$trial_type = rep_len(c(rep("same", 6), rep("different", 6)), nrow(siml)) # each
@@ -144,13 +145,13 @@ Infants' log(looking time) (DV) ~ 1 + familiarization order (ABB vs ABA) * trial
 
 # model without age
 fit_simple_model <- function(siml) {
-  m1 <- lmer(looking_time ~ 1 + trial_type * trial_num + (1 | subjID), data=siml)
+  m1 <- lmer(looking_time ~ 1 + trial_type * trial_num_sc + (1 | subjID), data=siml)
   return(summary(m1)$coefficients["trial_typesame","Pr(>|t|)"]) # "Estimate","t value",
 }
 
 # check both
 fit_model <- function(siml) {
-  m1 <- lmer(looking_time ~ 1 + trial_type * trial_num + trial_type * age + (1 | subjID) + (1 | labID), data=siml)
+  m1 <- lmer(looking_time ~ 1 + trial_type * trial_num_sc + trial_type * age + (1 | subjID) + (1 | labID), data=siml)
   sig =c(summary(m1)$coefficients["trial_typesame","Pr(>|t|)"],
        summary(m1)$coefficients["trial_typesame:age","Pr(>|t|)"])
   return(sig) # "Estimate","t value",
@@ -166,7 +167,7 @@ y ~ 1 + trial_type * trial_num + trial_type * age + (1 | subjID) + (1 | labID)
 
 To do the power analysis, we simply generate 1000 datasets with main effect sizes of 0.1, 0.2, and 0.3 for trial type, age, and their interaction, run the above linear mixed-effects model, and report how many times the trial type effect is significant.
 
-```{r, power-analysis}
+```{r, power-analysis, message=F, warning=F}
 # repeatedly generate data and  significance of trial_typesame
 get_power <- function(effect_sizes, N=100, alpha=.05, verbose=F) {
   p = data.frame(type=numeric(), "age*type"=numeric())
@@ -181,9 +182,11 @@ get_power <- function(effect_sizes, N=100, alpha=.05, verbose=F) {
   return(p)
 }
 
-N = 100
+N = 1000
 pvalues_pt1 = get_power(effect_sizes=list(type = .1, age = .1, "age*type"=.1), N=N)
+
 pvalues_pt2 = get_power(effect_sizes=list(type = .2, age = .2, "age*type"=.2), N=N)
+
 # .25 is the meta-analysis average effect size, but .3 is avg across all published devo expts
 pvalues_pt3 = get_power(effect_sizes=list(type = .3, age = .3, "age*type"=.3), N=N)
 ```
@@ -191,13 +194,17 @@ pvalues_pt3 = get_power(effect_sizes=list(type = .3, age = .3, "age*type"=.3), N
 ### Effect sizes = .1
 `r paste(length(which(pvalues_pt1$type<.05)), "of",N, "simulations had p <",.05, "for trial type.")`
 `r paste(length(which(pvalues_pt1[,"age*type"]<.05)), "of",N, "simulations had p <",.05, "for age*trial type.")` 
-
+(With 16 infants per lab (total N=320): 316 of 1000 simulations had p < 0.05 for trial type. 1000 of 1000 simulations had p < 0.05 for age*trial type.)
 
 ### Effect sizes = .2
 `r paste(length(which(pvalues_pt2$type<.05)), "of",N, "simulations had p <",.05, "for trial type.")`
 `r paste(length(which(pvalues_pt2[,"age*type"]<.05)), "of",N, "simulations had p <",.05, "for age*trial type.")` 
-
+(With 16 infants per lab (total N=320): 777 of 1000 simulations had p < 0.05 for trial type. 1000 of 1000 simulations had p < 0.05 for age*trial type.)
 
 ### Effect sizes = .3
 `r paste(length(which(pvalues_pt3$type<.05)), "of",N, "simulations had p <",.05, "for trial type.")`
 `r paste(length(which(pvalues_pt3[,"age*type"]<.05)), "of",N, "simulations had p <",.05, "for age*trial type.")` 
+(With 16 infants per lab (total N=320): 985 of 1000 simulations had p < 0.05 for trial type. 1000 of 1000 simulations had p < 0.05 for age*trial type.)
+
+For context, .25 is the average effect size from the meta-analysis of rule learning, and .3 is the average effect size across all published developmental experiments.
+Thus, the latter two power simulations probably pertain in our case.
