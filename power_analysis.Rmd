@@ -1,6 +1,5 @@
 ---
-title: "MB3 Power Analysis"
-author: "George & Angeline"
+title: "Appendix: Power Analysis"
 date: "`r Sys.Date()`"
 output:
   pdf_document: default
