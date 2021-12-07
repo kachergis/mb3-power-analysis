@@ -17,6 +17,9 @@ library(lmerTest)
 
 For this power analysis we will simulate 20 labs contributing 20 infants (400 participants) from 5 to 12 months of age.
 
+Notes: MB1 overall effect size was 0.29 for the single-screen central fixation (CF) method, with additional effect of 0.21 for HPP, and eye-tracking (ET) yielding a slight (non-significant) decrease in effect of -0.06.
+We expect to have 5-6 labs running HPP (100-120 infants), and the other 15-20 labs running CF/ET.
+
 Factors:
 
 * *familiarized_rule*: indicates the sequence to which infants were exposed during familiarization (ABA or ABB). Infants were exposed to only one sequence, with the sequence determined by random assignment. (GK: not counterbalanced per lab?)
@@ -58,7 +61,7 @@ generate_dataset <- function(n_labs=20, n_per_lab=20, effect_sizes=list(type = .
 
   # uniform random vars
   simd$age_mos = runif(nrow(simd), min=5.0, max=12.0)
-  simd$age = scale(simd$age_mos, center=T, scale=F)[,1]
+  simd$age = scale(simd$age_mos, center=T, scale=T)[,1]
 
   # should actually be bimodal (use MB1 distro?)
   simd$multilingual_exposure = runif(nrow(simd), min=0, max=.5) # 0=monolingual, .5=50% secondary language
@@ -74,7 +77,7 @@ generate_dataset <- function(n_labs=20, n_per_lab=20, effect_sizes=list(type = .
                      values_to="looking_time") 
 
   siml$trial_num = as.numeric(siml$trial_num)
-  siml$trial_num_sc = scale(siml$trial_num, center=T, scale=F) 
+  siml$trial_num_sc = scale(siml$trial_num, center=T, scale=T) 
 
   # 6 same / 6 different per child; should be according to 1 of 4 pseudorandom orders, but we're not  actually modeling order effects here so just make blocks:
   siml$trial_type = rep_len(c(rep("same", 6), rep("different", 6)), nrow(siml)) # each
@@ -95,11 +98,16 @@ generate_dataset <- function(n_labs=20, n_per_lab=20, effect_sizes=list(type = .
     siml[labInd,]$labInt = rnorm(1, mean=0, sd=1) # could increase per-lab variability ..
   }
   
-  trial_type = with(siml, ifelse(trial_type=="same", 0, 1))
+  trial_type = with(siml, ifelse(trial_type=="same", 0, 1)) 
   error_term = rnorm(nrow(siml), 0, sd=1) + siml$labInt + siml$subjInt 
   siml$looking_time = trial_type * effect_sizes$type + siml$age * effect_sizes$age + trial_type * siml$age * effect_sizes$`age*type` + error_term
   
   siml$subjID = as.factor(siml$subjID)
+  # switch from dummy-code to effects code 
+  siml$familiarized_rule = as.factor(siml$familiarized_rule)
+  siml$trial_type = as.factor(siml$trial_type)
+  contrasts(siml$familiarized_rule) = contr.sum(2)
+  contrasts(siml$trial_type) = contr.sum(2)
   return(siml)
 }
 
@@ -139,14 +147,14 @@ Infants' log(looking time) (DV) ~ 1 + familiarization order (ABB vs ABA) * trial
 # model without age
 fit_simple_model <- function(siml) {
   m1 <- lmer(looking_time ~ 1 + trial_type * trial_num_sc + (1 | subjID), data=siml)
-  return(summary(m1)$coefficients["trial_typesame","Pr(>|t|)"]) # "Estimate","t value",
-}
+  return(summary(m1)$coefficients["trial_type1","Pr(>|t|)"]) # "Estimate","t value",
+} # trial_type1 = different
 
 # check both
 fit_model <- function(siml) {
   m1 <- lmer(looking_time ~ 1 + trial_type * trial_num_sc + trial_type * age + (1 | subjID) + (1 | labID), data=siml)
-  sig =c(summary(m1)$coefficients["trial_typesame","Pr(>|t|)"],
-       summary(m1)$coefficients["trial_typesame:age","Pr(>|t|)"])
+  sig =c(summary(m1)$coefficients["trial_type1","Pr(>|t|)"],
+       summary(m1)$coefficients["trial_type1:age","Pr(>|t|)"])
   return(sig) # "Estimate","t value",
 }
 
